@@ -135,100 +135,7 @@ def normalize_input(input_items: list) -> tuple[list, dict]:
     return items, stats
 
 
-def normalize_messages(messages: list) -> tuple[list, dict]:
-    """Return a normalized copy of a chat/completions messages array and stats.
-
-    Handles:
-      - role="system",    content: str → strip message_ids and timestamps
-      - role="user",      content: str → strip timestamps
-      - role="user",      content: list of {type, text} blocks → strip timestamps
-      - everything else                → pass through unchanged
-    """
-    msgs = copy.deepcopy(messages)
-    stats = {"ts_removed": 0, "msg_ids_removed": 0, "items_modified": 0}
-
-    for msg in msgs:
-        modified = False
-        role = msg.get("role")
-        content = msg.get("content")
-
-        if role == "system" and isinstance(content, str):
-            new_text, ts_n, mid_n = _strip_text(content)
-            if new_text != content:
-                msg["content"] = new_text
-                stats["ts_removed"] += ts_n
-                stats["msg_ids_removed"] += mid_n
-                modified = True
-
-        elif role == "user" and isinstance(content, str):
-            new_text, ts_n, mid_n = _strip_text(content)
-            if new_text != content:
-                msg["content"] = new_text
-                stats["ts_removed"] += ts_n
-                stats["msg_ids_removed"] += mid_n
-                modified = True
-
-        elif role == "user" and isinstance(content, list):
-            for block in content:
-                if block.get("type") == "text" and "text" in block:
-                    original = block["text"]
-                    new_text, ts_n, mid_n = _strip_text(original)
-                    if new_text != original:
-                        block["text"] = new_text
-                        stats["ts_removed"] += ts_n
-                        stats["msg_ids_removed"] += mid_n
-                        modified = True
-
-        if modified:
-            stats["items_modified"] += 1
-
-    return msgs, stats
-
-
 # ── Route handlers ────────────────────────────────────────────────────────────
-
-@app.post("/v1/chat/completions")
-async def proxy_chat_completions(request: Request):
-    """Normalize then forward a chat completions request."""
-    body = await request.json()
-
-    original_messages = body.get("messages", [])
-    normalized_messages, stats = normalize_messages(original_messages)
-
-    is_stream = body.get("stream", False)
-
-    log.info("  → request roles: %s", [m.get("role","?") for m in body.get("messages",[])][-5:])
-    log.info("  → request tools: %s", json.dumps(body.get("tools", [])))
-    log.info(
-        "POST /v1/chat/completions | msgs=%d | ts_removed=%d | msg_ids_removed=%d | "
-        "items_modified=%d | stream=%s",
-        len(original_messages),
-        stats["ts_removed"],
-        stats["msg_ids_removed"],
-        stats["items_modified"],
-        is_stream,
-    )
-
-    if stats["ts_removed"] == 0 and stats["msg_ids_removed"] == 0:
-        log.warning("  → no volatile fields found; prompt sent as-is")
-
-    modified_body = {**body, "messages": normalized_messages}
-
-    if is_stream:
-        return StreamingResponse(
-            _stream_forward("/v1/chat/completions", modified_body),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
-
-    async with httpx.AsyncClient(timeout=300) as client:
-        resp = await client.post(
-            f"{BACKEND_URL}/v1/chat/completions",
-            json=modified_body,
-            headers={"Content-Type": "application/json"},
-        )
-    return JSONResponse(content=resp.json(), status_code=resp.status_code)
-
 
 @app.post("/v1/responses")
 async def proxy_responses(request: Request):
@@ -284,7 +191,6 @@ async def _stream_forward(path: str, body: dict):
     """
     t0 = time.time()
     bytes_sent = 0
-    chunks = []
     async with httpx.AsyncClient(timeout=300) as client:
         async with client.stream(
             "POST",
@@ -295,10 +201,6 @@ async def _stream_forward(path: str, body: dict):
             async for chunk in resp.aiter_bytes():
                 yield chunk
                 bytes_sent += len(chunk)
-                chunks.append(chunk)
-    full = b"".join(chunks).decode("utf-8", errors="replace")
-    log.info("  → raw response full: %s", full)
-    log.info("  → raw response last: %s", full[-5000:])
     log.info("  → stream done in %.1fs, %d bytes", time.time() - t0, bytes_sent)
 
 
