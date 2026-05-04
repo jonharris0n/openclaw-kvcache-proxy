@@ -14,16 +14,19 @@ OpenClaw injects volatile fields into every request:
      because everything after this point is treated as "new" by the cache.
 
   2. USER MESSAGES — timestamp prefix:
-         [Wed 2026-02-18 20:48 UTC] Hello
+         [Wed 2026-02-18 20:48 UTC] Hello   (old: UTC)
+         [Tue 2026-04-28 12:44 PDT] Hello   (new: local tz abbreviation)
      Injected per-message, busts the conversation-history prefix too.
 
 ── Optimizations applied ────────────────────────────────────────────────────
-  STRIP_MESSAGE_IDS = True   (primary, high impact)
-    Removes "message_id": "..." from all JSON blocks in system + user items.
-    Expected: sim_best rises from ~0.15 toward ~0.95+
+  STRIP_MESSAGE_IDS = True   (was primary — now a no-op)
+    OpenClaw inbound_meta.v2 (≥2026.4.x) removed the volatile "message_id"
+    UUID from the system prompt entirely. This toggle is harmless to leave on.
 
-  STRIP_TIMESTAMPS = True    (secondary, lower impact)
-    Removes [Day YYYY-MM-DD HH:MM UTC] prefix from user message text.
+  STRIP_TIMESTAMPS = True    (now the only active fix)
+    Removes [Day YYYY-MM-DD HH:MM TZ] prefix from user message text.
+    Note: OpenClaw changed from UTC to local timezone (PDT, PST, etc.) —
+    regex updated to match any 2-5 char uppercase timezone abbreviation.
 
 Both can be toggled below. Logging shows per-request normalization stats.
 """
@@ -55,9 +58,10 @@ _MSG_ID_RE = re.compile(
     r'\n[ \t]*"message_id"\s*:\s*"[^"]+",?'
 )
 
-# Matches OpenClaw's per-message timestamp: [Wed 2026-02-18 20:48 UTC]
+# Matches OpenClaw's per-message timestamp: [Wed 2026-02-18 20:48 UTC] or [Tue 2026-04-28 12:44 PDT]
+# OpenClaw changed from UTC to local timezone abbreviation — match any 2-5 char uppercase tz.
 _TIMESTAMP_RE = re.compile(
-    r'\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC\] '
+    r'\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{4}-\d{2}-\d{2} \d{2}:\d{2} [A-Z]{2,5}\] '
 )
 
 # ── Logging ───────────────────────────────────────────────────────────────────
