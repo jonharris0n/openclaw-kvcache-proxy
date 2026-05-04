@@ -54,14 +54,12 @@ STRIP_TIMESTAMPS = True
 
 # ── Patterns ─────────────────────────────────────────────────────────────────
 # Matches the "message_id" line inside any JSON block (with optional trailing comma)
-_MSG_ID_RE = re.compile(
-    r'\n[ \t]*"message_id"\s*:\s*"[^"]+",?'
-)
+_MSG_ID_RE = re.compile(r'\n[ \t]*"message_id"\s*:\s*"[^"]+",?')
 
 # Matches OpenClaw's per-message timestamp: [Wed 2026-02-18 20:48 UTC] or [Tue 2026-04-28 12:44 PDT]
 # OpenClaw changed from UTC to local timezone abbreviation — match any 2-5 char uppercase tz.
 _TIMESTAMP_RE = re.compile(
-    r'\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{4}-\d{2}-\d{2} \d{2}:\d{2} [A-Z]{2,5}\] '
+    r"\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{4}-\d{2}-\d{2} \d{2}:\d{2} [A-Z]{2,5}\] "
 )
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -191,6 +189,7 @@ def normalize_messages(messages: list) -> tuple[list, dict]:
 
 # ── Route handlers ────────────────────────────────────────────────────────────
 
+
 @app.post("/v1/chat/completions")
 async def proxy_chat_completions(request: Request):
     """Normalize then forward a chat completions request."""
@@ -201,7 +200,10 @@ async def proxy_chat_completions(request: Request):
 
     is_stream = body.get("stream", False)
 
-    log.info("  → request roles: %s", [m.get("role","?") for m in body.get("messages",[])][-5:])
+    log.info(
+        "  → request roles: %s",
+        [m.get("role", "?") for m in body.get("messages", [])][-5:],
+    )
     log.info("  → request tools: %s", json.dumps(body.get("tools", [])))
     log.info(
         "POST /v1/chat/completions | msgs=%d | ts_removed=%d | msg_ids_removed=%d | "
@@ -288,7 +290,6 @@ async def _stream_forward(path: str, body: dict):
     """
     t0 = time.time()
     bytes_sent = 0
-    chunks = []
     async with httpx.AsyncClient(timeout=300) as client:
         async with client.stream(
             "POST",
@@ -299,10 +300,6 @@ async def _stream_forward(path: str, body: dict):
             async for chunk in resp.aiter_bytes():
                 yield chunk
                 bytes_sent += len(chunk)
-                chunks.append(chunk)
-    full = b"".join(chunks).decode("utf-8", errors="replace")
-    log.info("  → raw response full: %s", full)
-    log.info("  → raw response last: %s", full[-5000:])
     log.info("  → stream done in %.1fs, %d bytes", time.time() - t0, bytes_sent)
 
 
@@ -353,6 +350,7 @@ async def catch_all(full_path: str, request: Request):
         return JSONResponse(content=resp.json(), status_code=resp.status_code)
     except Exception:
         from fastapi.responses import PlainTextResponse
+
         return PlainTextResponse(content=resp.text, status_code=resp.status_code)
 
 
